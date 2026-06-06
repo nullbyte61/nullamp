@@ -1,0 +1,9 @@
+[submodule "dpf"]
+	path = dpf
+	url = https://github.com/DISTRHO/DPF.git
+[submodule "deps/NeuralAmpModelerCore"]
+	path = deps/NeuralAmpModelerCore
+	url = https://github.com/sdatkinson/NeuralAmpModelerCore.git
+[submodule "deps/AudioDSPTools"]
+	path = deps/AudioDSPTools
+	url = https://github.com/sdatkinson/AudioDSPTools.git

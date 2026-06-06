@@ -1,0 +1,67 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A new push to the same ref cancels an in-progress run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: Linux (${{ matrix.compiler }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc]
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build lld \
+            libgl1-mesa-dev libx11-dev libxext-dev libxrandr-dev \
+            libxcursor-dev libxinerama-dev libfreetype6-dev \
+            libasound2-dev libjack-jackd2-dev libdbus-1-dev
+
+      - name: Configure
+        run: |
+          CC=${{ matrix.compiler == 'clang' && 'clang' || 'gcc' }}
+          CXX=${{ matrix.compiler == 'clang' && 'clang++' || 'g++' }}
+          # lld links the whole-archived, Eigen-heavy nam_core far faster and with
+          # much less memory than the default linker, which otherwise crawls on the
+          # 2-core runners.
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=$CC -DCMAKE_CXX_COMPILER=$CXX \
+            -DCMAKE_EXE_LINKER_FLAGS="-fuse-ld=lld" \
+            -DCMAKE_SHARED_LINKER_FLAGS="-fuse-ld=lld" \
+            -DCMAKE_MODULE_LINKER_FLAGS="-fuse-ld=lld"
+
+      - name: Build
+        run: cmake --build build -j"$(nproc)"
+
+      - name: Functional tests (tone stack + noise gate)
+        run: ./build/chain_test
+
+      - name: Bit-exactness gate (vs upstream render)
+        run: ./test/ab_test.sh build
+
+      - name: Upload plugin bundles
+        uses: actions/upload-artifact@v4
+        with:
+          name: nullamp-${{ matrix.compiler }}
+          path: |
+            build/bin/Nullamp.lv2
+            build/bin/Nullamp.vst3
+            build/bin/Nullamp.clap
+          if-no-files-found: error

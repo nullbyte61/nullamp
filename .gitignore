@@ -1,0 +1,10 @@
+/build/
+/build-*/
+*.o
+*.a
+*.so
+*.lv2/
+*.clap
+*.vst3/
+compile_commands.json
+.cache/

@@ -1,0 +1,102 @@
+name: Release
+
+# Cut a release by pushing a tag like v0.2.0:
+#   git tag -a v0.2.0 -m "Nullamp 0.2.0" && git push origin v0.2.0
+# This builds, runs the test gates, packages the bundles, and publishes a GitHub Release.
+
+on:
+  push:
+    tags: ['v*']
+
+# Re-pushing the same tag cancels an in-progress release run for it.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Check tag matches project version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          proj="$(grep -Po 'project\(Nullamp VERSION \K[0-9]+\.[0-9]+\.[0-9]+' CMakeLists.txt)"
+          echo "tag=$tag  CMakeLists=$proj"
+          if [ "$tag" != "$proj" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match project version $proj in CMakeLists.txt"
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build lld \
+            libgl1-mesa-dev libx11-dev libxext-dev libxrandr-dev \
+            libxcursor-dev libxinerama-dev libfreetype6-dev \
+            libasound2-dev libjack-jackd2-dev libdbus-1-dev
+
+      - name: Configure
+        run: |
+          # Pin gcc, matching the proven build.yml. The default compiler hits a
+          # clang -O3 optimizer hang on the heavy template code.
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ \
+            -DCMAKE_EXE_LINKER_FLAGS="-fuse-ld=lld" \
+            -DCMAKE_SHARED_LINKER_FLAGS="-fuse-ld=lld" \
+            -DCMAKE_MODULE_LINKER_FLAGS="-fuse-ld=lld"
+
+      - name: Build
+        run: cmake --build build -j"$(nproc)"
+
+      - name: Test gates
+        run: |
+          ./build/chain_test
+          ./test/ab_test.sh build
+
+      - name: Package
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          name="nullamp-${version}-linux-x86_64"
+          dir="dist/$name"
+          mkdir -p "$dir"
+          cp -r build/bin/Nullamp.lv2 build/bin/Nullamp.vst3 "$dir/"
+          cp build/bin/Nullamp.clap build/bin/Nullamp "$dir/"
+          cp README.md LICENSE CHANGELOG.md packaging/install.sh packaging/uninstall.sh "$dir/"
+          chmod +x "$dir/install.sh" "$dir/uninstall.sh"
+          # Strip binaries to keep the download small.
+          find "$dir" -type f \( -name '*.so' -o -name '*.clap' -o -name Nullamp \) -exec strip --strip-unneeded {} + || true
+          tar -C dist -czf "$name.tar.gz" "$name"
+          sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
+          ls -la "$name.tar.gz" "$name.tar.gz.sha256"
+
+      - name: Extract release notes from CHANGELOG
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v ver="$version" '
+            $0 ~ "^## \\[" ver "\\]" {flag=1; next}
+            /^## \[/ && flag {exit}
+            flag {print}
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "Nullamp ${GITHUB_REF_NAME}" > release-notes.md
+          fi
+          cat release-notes.md
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "Nullamp $GITHUB_REF_NAME" \
+            --notes-file release-notes.md \
+            nullamp-*-linux-x86_64.tar.gz \
+            nullamp-*-linux-x86_64.tar.gz.sha256
