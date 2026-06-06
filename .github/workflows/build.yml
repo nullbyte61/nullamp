@@ -48,7 +48,10 @@ jobs:
             -DCMAKE_MODULE_LINKER_FLAGS="-fuse-ld=lld"
 
       - name: Build
-        run: cmake --build build -j"$(nproc)"
+        # -j2 caps peak memory: the Eigen-heavy -O3 compiles can exhaust smaller
+        # runners at full parallelism and stall the build. (Links are already
+        # serialized by the CMake link job pool.)
+        run: cmake --build build -j2
 
       - name: Functional tests (tone stack + noise gate)
         run: ./build/chain_test

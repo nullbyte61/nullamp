@@ -55,7 +55,8 @@ jobs:
             -DCMAKE_MODULE_LINKER_FLAGS="-fuse-ld=lld"
 
       - name: Build
-        run: cmake --build build -j"$(nproc)"
+        # -j2 caps peak memory (see build.yml).
+        run: cmake --build build -j2
 
       - name: Test gates
         run: |
