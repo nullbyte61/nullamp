@@ -4,6 +4,7 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <functional>
 #include <memory>
@@ -33,6 +34,11 @@ public:
         delete mReady.exchange(nullptr);
         delete mRetired.exchange(nullptr);
     }
+
+    /// Set a callback run periodically on the loader thread (and after each build).
+    /// Because this thread is also the one that frees retired objects, the callback can
+    /// safely touch the active object. Set before any request.
+    void setPoll(std::function<void()> poll) { mPoll = std::move(poll); }
 
     /// Non-RT. A null builder requests a clear (drop the active object).
     void request(Builder builder)
@@ -66,16 +72,31 @@ private:
         for (;;)
         {
             Builder builder;
+            bool haveRequest = false;
             {
                 std::unique_lock<std::mutex> lock(mMutex);
-                mCv.wait(lock, [this] { return mHasRequest; });
+                // With a poll callback, wake periodically so it can run; otherwise sleep until a request.
+                if (mPoll)
+                    mCv.wait_for(lock, std::chrono::milliseconds(50), [this] { return mHasRequest; });
+                else
+                    mCv.wait(lock, [this] { return mHasRequest; });
                 if (mQuit)
                     return;
-                mHasRequest = false;
-                builder = std::move(mBuilder);
+                if (mHasRequest)
+                {
+                    mHasRequest = false;
+                    builder = std::move(mBuilder);
+                    haveRequest = true;
+                }
             }
 
             delete mRetired.exchange(nullptr); // free what the audio thread retired
+
+            if (mPoll)
+                mPoll();
+
+            if (!haveRequest)
+                continue;
 
             if (!builder)
             {
@@ -94,6 +115,7 @@ private:
     std::mutex mMutex;
     std::condition_variable mCv;
     Builder mBuilder;
+    std::function<void()> mPoll;
     bool mHasRequest = false;
     bool mQuit = false;
 

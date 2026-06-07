@@ -7,7 +7,9 @@
 #include "DistrhoPlugin.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -34,6 +36,8 @@ public:
     {
         mGateTrigger.AddListener(&mGateGain);
         allocScratch(static_cast<int>(getBufferSize() > 0 ? getBufferSize() : 1024));
+        // The loader thread applies the Quality (slim) value to the active model off-RT.
+        mModelLoader.setPoll([this] { applySlim(); });
     }
 
 protected:
@@ -46,7 +50,7 @@ protected:
     const char* getMaker() const override { return "nullbyte61"; }
     const char* getHomePage() const override { return "https://github.com/nullbyte61/nullamp"; }
     const char* getLicense() const override { return "MIT"; }
-    uint32_t getVersion() const override { return d_version(0, 2, 0); }
+    uint32_t getVersion() const override { return d_version(0, 3, 0); }
     int64_t getUniqueId() const override { return d_cconst('N', 'u', 'l', 'a'); }
 
     // --- Parameters ---------------------------------------------------------
@@ -127,6 +131,12 @@ protected:
             parameter.unit = "dBu";
             parameter.ranges = ParameterRanges(12.0f, -60.0f, 60.0f);
             break;
+        case kParamQuality:
+            parameter.hints = kParameterIsAutomatable;
+            parameter.name = "Quality";
+            parameter.symbol = "quality";
+            parameter.ranges = ParameterRanges(1.0f, 0.0f, 1.0f); // only affects slimmable models
+            break;
         case kParamMeterIn:
             parameter.hints = kParameterIsAutomatable | kParameterIsOutput;
             parameter.name = "Meter In";
@@ -156,6 +166,7 @@ protected:
         case kParamOutputGain: return fOutputGainDb;
         case kParamOutputMode: return static_cast<float>(fOutputMode);
         case kParamInputCalibration: return fInputCalibrationDb;
+        case kParamQuality: return mQuality.load(std::memory_order_relaxed);
         case kParamMeterIn: return fMeterIn;
         case kParamMeterOut: return fMeterOut;
         }
@@ -176,6 +187,11 @@ protected:
         case kParamOutputGain: fOutputGainDb = value; break;
         case kParamOutputMode: fOutputMode = static_cast<int>(value + 0.5f); break;
         case kParamInputCalibration: fInputCalibrationDb = value; break;
+        case kParamQuality:
+            // Stored atomically; the loader thread applies it to the model (not RT-safe).
+            mQuality.store(value, std::memory_order_relaxed);
+            mQualitySeq.fetch_add(1, std::memory_order_release);
+            break;
         }
     }
 
@@ -198,6 +214,8 @@ protected:
         fToneStackBypass = false;
         fIRBypass = false;
         fInputCalibrationDb = 12.0f;
+        mQuality.store(1.0f, std::memory_order_relaxed);
+        mQualitySeq.fetch_add(1, std::memory_order_release);
         switch (index)
         {
         case kProgramInit:
@@ -418,10 +436,14 @@ private:
         const std::string path = fModelPath;
         const double sr = mSampleRate;
         const int maxBlock = mMaxBlock;
-        mModelLoader.request([path, sr, maxBlock]() -> std::unique_ptr<NamModel> {
+        mModelLoader.request([this, path, sr, maxBlock]() -> std::unique_ptr<NamModel> {
             auto m = NamModel::load(path);
             if (m)
+            {
                 m->prepare(sr, maxBlock, /*doPrewarm=*/true);
+                if (m->isSlimmable())
+                    m->setSlimmableSize(mQuality.load(std::memory_order_relaxed));
+            }
             return m;
         });
     }
@@ -447,8 +469,12 @@ private:
     {
         if (NamModel* incoming = mModelLoader.popReady())
         {
-            mModelLoader.retire(mModel.release());
+            NamModel* old = mModel.release();
             mModel.reset(incoming);
+            // Publish the new active model before retiring the old one, so the loader
+            // thread's slim poll never dereferences a model that is being freed.
+            mActiveModelPtr.store(incoming, std::memory_order_release);
+            mModelLoader.retire(old);
             mModelHasLoudness = mModel->hasLoudness();
             mModelLoudnessDb = mModel->loudness();
             mModelHasInputLevel = mModel->hasInputLevel();
@@ -459,7 +485,9 @@ private:
         }
         if (mModelLoader.popClear())
         {
-            mModelLoader.retire(mModel.release());
+            NamModel* old = mModel.release();
+            mActiveModelPtr.store(nullptr, std::memory_order_release);
+            mModelLoader.retire(old);
             mModelHasLoudness = mModelHasInputLevel = mModelHasOutputLevel = false;
             mModelLoudnessDb = mModelInputLevelDb = mModelOutputLevelDb = 0.0;
             setLatency(0);
@@ -471,6 +499,21 @@ private:
         }
         if (mIRLoader.popClear())
             mIRLoader.retire(mIR.release());
+    }
+
+    // Runs on the model loader thread (registered via setPoll). Applies the latest Quality
+    // value to the active model when it changed. SetSlimmableSize is not RT-safe, so it must
+    // not run on the audio thread; this thread also owns model freeing, so touching the active
+    // model here is lifetime-safe.
+    void applySlim()
+    {
+        const uint32_t seq = mQualitySeq.load(std::memory_order_acquire);
+        if (seq == mSlimAppliedSeq)
+            return;
+        mSlimAppliedSeq = seq;
+        if (NamModel* m = mActiveModelPtr.load(std::memory_order_acquire))
+            if (m->isSlimmable())
+                m->setSlimmableSize(mQuality.load(std::memory_order_relaxed));
     }
 
     // Parameters
@@ -509,6 +552,13 @@ private:
     // model calibration cache
     bool mModelHasLoudness = false, mModelHasInputLevel = false, mModelHasOutputLevel = false;
     double mModelLoudnessDb = 0.0, mModelInputLevelDb = 0.0, mModelOutputLevelDb = 0.0;
+
+    // Quality (slim). mQuality/mQualitySeq written from the host thread, read by the loader
+    // thread; mActiveModelPtr published by the audio thread; mSlimAppliedSeq is loader-only.
+    std::atomic<float> mQuality{1.0f};
+    std::atomic<uint32_t> mQualitySeq{0};
+    std::atomic<NamModel*> mActiveModelPtr{nullptr};
+    uint32_t mSlimAppliedSeq = 0;
 
     // Loaders
     AsyncLoader<NamModel> mModelLoader;

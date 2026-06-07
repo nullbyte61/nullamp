@@ -97,6 +97,9 @@ ARM/aarch64 too (a 64-bit Raspberry Pi, for example), but that is not tested yet
 3. Optionally click Load next to IR and pick a cabinet `.wav`, then toggle it Active or Bypassed.
 4. Set Input, Gate, the Bass/Mid/Treble tone stack, Output, and the output mode to taste.
 
+For slimmable models, the **Quality** knob trades fidelity for CPU (1.0 = full quality). It has no
+effect on regular models, useful on low-powered hardware like a Raspberry Pi.
+
 Free amp captures and cabinet IRs are easy to find. [TONE3000](https://tone3000.com) is a good source
 for `.nam` models.
 

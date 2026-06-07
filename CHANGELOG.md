@@ -6,7 +6,11 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-06
+
 ### Added
+- `Quality` control for slimmable models (e.g. slimmable WaveNets): trades fidelity for CPU,
+  applied off the audio thread. No effect on non-slimmable models.
 - Resizable GUI window (uniform scaling, aspect ratio preserved).
 - Knob interaction: double-click resets to default, scroll-wheel adjusts.
 

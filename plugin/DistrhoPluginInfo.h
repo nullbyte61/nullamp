@@ -39,6 +39,7 @@ enum Parameters {
     kParamOutputGain,       // dB, post-chain
     kParamOutputMode,       // Raw / Normalized / Calibrated
     kParamInputCalibration, // dBu, for input level + Calibrated output
+    kParamQuality,          // 0..1 slim size for slimmable models (1 = full quality)
     kParamMeterIn,          // output: input peak (linear), for the GUI meter
     kParamMeterOut,         // output: output peak (linear), for the GUI meter
     kParamCount

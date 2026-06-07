@@ -4,6 +4,7 @@
 #include <exception>
 
 #include "NAM/get_dsp.h"
+#include "NAM/slimmable.h"
 
 #include "iplug_shim.h" // must precede ResamplingContainer.h (provides iplug::PI, dsp::DEFAULT_BLOCK_SIZE)
 #include "ResamplingContainer/ResamplingContainer.h"
@@ -28,8 +29,15 @@ std::unique_ptr<NamModel> NamModel::load(const std::filesystem::path& path)
         return nullptr;
 
     std::unique_ptr<NamModel> m(new NamModel());
+    m->mSlim = dynamic_cast<nam::SlimmableModel*>(dsp.get());
     m->mDsp = std::move(dsp);
     return m;
+}
+
+void NamModel::setSlimmableSize(double value) noexcept
+{
+    if (mSlim != nullptr)
+        mSlim->SetSlimmableSize(value);
 }
 
 double NamModel::expectedSampleRate() const noexcept

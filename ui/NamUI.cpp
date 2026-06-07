@@ -50,6 +50,7 @@ const KnobDef kKnobs[] = {
     { 70.0f, 335.0f, 38.0f, kParamBass,               0.0f,  10.0f,    5.0f,   5.0f, "Bass",   "%.1f"},
     {165.0f, 335.0f, 38.0f, kParamMid,                0.0f,  10.0f,    5.0f,   5.0f, "Mid",    "%.1f"},
     {260.0f, 335.0f, 38.0f, kParamTreble,             0.0f,  10.0f,    5.0f,   5.0f, "Treble", "%.1f"},
+    {355.0f, 335.0f, 38.0f, kParamQuality,            0.0f,   1.0f,    0.0f,   1.0f, "Quality","%.2f"},
 };
 const int kNumKnobs = (int)(sizeof(kKnobs) / sizeof(kKnobs[0]));
 
@@ -103,6 +104,7 @@ protected:
         case kParamOutputGain: fOutputGain = value; break;
         case kParamOutputMode: fOutputMode = static_cast<int>(value + 0.5f); break;
         case kParamInputCalibration: fCalib = value; break;
+        case kParamQuality: fQuality = value; break;
         case kParamMeterIn: fMeterIn = value; break;
         case kParamMeterOut: fMeterOut = value; break;
         default: return;
@@ -265,6 +267,7 @@ private:
         case kParamBass: return fBass;
         case kParamMid: return fMid;
         case kParamTreble: return fTreble;
+        case kParamQuality: return fQuality;
         }
         return fDummy;
     }
@@ -387,7 +390,7 @@ private:
     }
 
     // param mirror
-    float fInputGain = 0.0f, fOutputGain = 0.0f, fGate = -100.0f, fCalib = 12.0f;
+    float fInputGain = 0.0f, fOutputGain = 0.0f, fGate = -100.0f, fCalib = 12.0f, fQuality = 1.0f;
     float fBass = 5.0f, fMid = 5.0f, fTreble = 5.0f;
     bool fEqBypass = false, fIRBypass = false;
     int fOutputMode = 0;

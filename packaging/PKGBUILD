@@ -7,7 +7,7 @@
 #     git submodule update --init --recursive
 #
 pkgname=nullamp
-pkgver=0.2.0
+pkgver=0.3.0
 pkgrel=1
 pkgdesc="A player for Neural Amp Modeler captures (LV2/CLAP/VST3/JACK)"
 arch=('x86_64' 'aarch64')
