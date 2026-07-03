@@ -102,6 +102,12 @@ protected:
             parameter.symbol = "ir_bypass";
             parameter.ranges = ParameterRanges(0.0f, 0.0f, 1.0f);
             break;
+        case kParamModelBypass:
+            parameter.hints = kParameterIsAutomatable | kParameterIsBoolean;
+            parameter.name = "Model Bypass";
+            parameter.symbol = "model_bypass";
+            parameter.ranges = ParameterRanges(0.0f, 0.0f, 1.0f);
+            break;
         case kParamOutputGain:
             parameter.hints = kParameterIsAutomatable;
             parameter.name = "Output Gain";
@@ -163,6 +169,7 @@ protected:
         case kParamTreble: return fTreble;
         case kParamToneStackBypass: return fToneStackBypass ? 1.0f : 0.0f;
         case kParamIRBypass: return fIRBypass ? 1.0f : 0.0f;
+        case kParamModelBypass: return fModelBypass ? 1.0f : 0.0f;
         case kParamOutputGain: return fOutputGainDb;
         case kParamOutputMode: return static_cast<float>(fOutputMode);
         case kParamInputCalibration: return fInputCalibrationDb;
@@ -184,6 +191,7 @@ protected:
         case kParamTreble: fTreble = value; break;
         case kParamToneStackBypass: fToneStackBypass = value > 0.5f; break;
         case kParamIRBypass: fIRBypass = value > 0.5f; break;
+        case kParamModelBypass: fModelBypass = value > 0.5f; break;
         case kParamOutputGain: fOutputGainDb = value; break;
         case kParamOutputMode: fOutputMode = static_cast<int>(value + 0.5f); break;
         case kParamInputCalibration: fInputCalibrationDb = value; break;
@@ -213,6 +221,7 @@ protected:
         fBass = fMid = fTreble = 5.0f;
         fToneStackBypass = false;
         fIRBypass = false;
+        fModelBypass = false;
         fInputCalibrationDb = 12.0f;
         mQuality.store(1.0f, std::memory_order_relaxed);
         mQualitySeq.fetch_add(1, std::memory_order_release);
@@ -314,15 +323,29 @@ protected:
         adoptPending();
         applyToneStack(false); // refresh biquads only if Bass/Mid/Treble changed
 
+        // The model is one optional stage in the chain: skipped when no model is loaded
+        // or when the user bypasses it. The rest of the chain (gate, EQ, IR, output) still
+        // runs so an IR-only / model-bypassed setup works and lines up for A/B.
+        const bool modelActive = mModel != nullptr && !fModelBypass;
+
+        // Report the model's latency only while it is actually in the path, so a bypassed
+        // (or absent) model reports zero and the host's delay compensation stays aligned.
+        const uint32_t desiredLatency = modelActive ? mModelLatency : 0;
+        if (desiredLatency != mLatencyReported)
+        {
+            mLatencyReported = desiredLatency;
+            setLatency(desiredLatency);
+        }
+
         // Input gain, plus input calibration into the model's expected level.
         double inputDb = fInputGainDb;
-        if (mModel != nullptr && mModelHasInputLevel)
+        if (modelActive && mModelHasInputLevel)
             inputDb += fInputCalibrationDb - mModelInputLevelDb;
         const double inGain = dbToLin(inputDb);
 
-        // Output gain, plus the selected normalization.
+        // Output gain, plus the selected normalization (only meaningful with an active model).
         double normDb = 0.0;
-        if (mModel != nullptr)
+        if (modelActive)
         {
             if (fOutputMode == kOutputNormalized && mModelHasLoudness)
                 normDb = kNormalizationTargetDb - mModelLoudnessDb;
@@ -334,7 +357,7 @@ protected:
         const float* in = inputs[0];
         float* out = outputs[0];
 
-        if (mModel != nullptr && frames <= static_cast<uint32_t>(mScratchCap))
+        if (frames <= static_cast<uint32_t>(mScratchCap))
         {
             for (uint32_t i = 0; i < frames; ++i)
                 mInD[i] = static_cast<double>(in[i]) * inGain;
@@ -349,9 +372,18 @@ protected:
                 mGateTrigger.Process(trigIn, 1, frames);
             }
 
-            mModel->process(mInD.data(), mModelOut.data(), static_cast<int>(frames));
+            // Model stage (or dry passthrough into the chain when inactive).
+            double* sig;
+            if (modelActive)
+            {
+                mModel->process(mInD.data(), mModelOut.data(), static_cast<int>(frames));
+                sig = mModelOut.data();
+            }
+            else
+            {
+                sig = mInD.data();
+            }
 
-            double* sig = mModelOut.data();
             if (gateActive)
             {
                 double* gIn[1] = {sig};
@@ -481,7 +513,8 @@ private:
             mModelInputLevelDb = mModel->inputLevel();
             mModelHasOutputLevel = mModel->hasOutputLevel();
             mModelOutputLevelDb = mModel->outputLevel();
-            setLatency(static_cast<uint32_t>(mModel->latencySamples()));
+            // Cache latency; run() reports it to the host, and zeroes it when bypassed.
+            mModelLatency = static_cast<uint32_t>(mModel->latencySamples());
         }
         if (mModelLoader.popClear())
         {
@@ -490,7 +523,7 @@ private:
             mModelLoader.retire(old);
             mModelHasLoudness = mModelHasInputLevel = mModelHasOutputLevel = false;
             mModelLoudnessDb = mModelInputLevelDb = mModelOutputLevelDb = 0.0;
-            setLatency(0);
+            mModelLatency = 0;
         }
         if (dsp::ImpulseResponse* incoming = mIRLoader.popReady())
         {
@@ -522,6 +555,7 @@ private:
     float fBass = 5.0f, fMid = 5.0f, fTreble = 5.0f;
     bool fToneStackBypass = false;
     bool fIRBypass = false;
+    bool fModelBypass = false;
     float fOutputGainDb = 0.0f;
     int fOutputMode = kOutputRaw;
     float fInputCalibrationDb = 12.0f;
@@ -552,6 +586,8 @@ private:
     // model calibration cache
     bool mModelHasLoudness = false, mModelHasInputLevel = false, mModelHasOutputLevel = false;
     double mModelLoudnessDb = 0.0, mModelInputLevelDb = 0.0, mModelOutputLevelDb = 0.0;
+    uint32_t mModelLatency = 0;    // active model's latency; 0 when none/bypassed
+    uint32_t mLatencyReported = 0; // last value pushed to setLatency()
 
     // Quality (slim). mQuality/mQualitySeq written from the host thread, read by the loader
     // thread; mActiveModelPtr published by the audio thread; mSlimAppliedSeq is loader-only.

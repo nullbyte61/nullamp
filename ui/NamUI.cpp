@@ -34,9 +34,10 @@ struct KnobDef
 };
 
 // Buttons
-const Rect kModelBtn  = {360.0f,  70.0f, 100.0f, 26.0f};
-const Rect kIRBtn     = {300.0f, 110.0f,  76.0f, 26.0f};
-const Rect kIRBypass  = {382.0f, 110.0f,  78.0f, 26.0f};
+const Rect kModelBtn    = {300.0f,  70.0f,  76.0f, 26.0f};
+const Rect kModelBypass = {382.0f,  70.0f,  78.0f, 26.0f};
+const Rect kIRBtn       = {300.0f, 110.0f,  76.0f, 26.0f};
+const Rect kIRBypass    = {382.0f, 110.0f,  78.0f, 26.0f};
 const Rect kModeBtn   = {20.0f,  410.0f, 180.0f, 32.0f};
 const Rect kEqBypass  = {210.0f, 410.0f, 120.0f, 32.0f};
 
@@ -101,6 +102,7 @@ protected:
         case kParamTreble: fTreble = value; break;
         case kParamToneStackBypass: fEqBypass = value > 0.5f; break;
         case kParamIRBypass: fIRBypass = value > 0.5f; break;
+        case kParamModelBypass: fModelBypass = value > 0.5f; break;
         case kParamOutputGain: fOutputGain = value; break;
         case kParamOutputMode: fOutputMode = static_cast<int>(value + 0.5f); break;
         case kParamInputCalibration: fCalib = value; break;
@@ -147,6 +149,7 @@ protected:
         drawLabel(20, 80, "MODEL");
         drawValue(90, 80, fModelName.c_str());
         drawButton(kModelBtn, "Load", false);
+        drawButton(kModelBypass, fModelBypass ? "Bypassed" : "Active", fModelBypass);
 
         drawLabel(20, 120, "IR");
         drawValue(60, 120, fIRName.c_str());
@@ -176,9 +179,10 @@ protected:
             const double x = ev.pos.getX() / s;
             const double y = ev.pos.getY() / s;
 
-            if (kModelBtn.contains(x, y)) { requestStateFile("model"); return true; }
-            if (kIRBtn.contains(x, y))    { requestStateFile("ir");    return true; }
-            if (kIRBypass.contains(x, y)) { toggleBool(kParamIRBypass, fIRBypass); return true; }
+            if (kModelBtn.contains(x, y))    { requestStateFile("model"); return true; }
+            if (kModelBypass.contains(x, y)) { toggleBool(kParamModelBypass, fModelBypass); return true; }
+            if (kIRBtn.contains(x, y))       { requestStateFile("ir");    return true; }
+            if (kIRBypass.contains(x, y))    { toggleBool(kParamIRBypass, fIRBypass); return true; }
             if (kEqBypass.contains(x, y)) { toggleBool(kParamToneStackBypass, fEqBypass); return true; }
             if (kModeBtn.contains(x, y))  { cycleMode(); return true; }
 
@@ -392,7 +396,7 @@ private:
     // param mirror
     float fInputGain = 0.0f, fOutputGain = 0.0f, fGate = -100.0f, fCalib = 12.0f, fQuality = 1.0f;
     float fBass = 5.0f, fMid = 5.0f, fTreble = 5.0f;
-    bool fEqBypass = false, fIRBypass = false;
+    bool fEqBypass = false, fIRBypass = false, fModelBypass = false;
     int fOutputMode = 0;
     float fMeterIn = 0.0f, fMeterOut = 0.0f;
     float fDummy = 0.0f;

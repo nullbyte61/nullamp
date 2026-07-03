@@ -40,6 +40,9 @@ enum Parameters {
     kParamOutputMode,       // Raw / Normalized / Calibrated
     kParamInputCalibration, // dBu, for input level + Calibrated output
     kParamQuality,          // 0..1 slim size for slimmable models (1 = full quality)
+    // Appended after Quality (not grouped with the other bypasses) to preserve the
+    // v0.2.0 parameter indices of Output Gain..Quality for host automation compatibility.
+    kParamModelBypass,      // bool: bypass the NAM model (dry through to EQ/IR/output)
     kParamMeterIn,          // output: input peak (linear), for the GUI meter
     kParamMeterOut,         // output: output peak (linear), for the GUI meter
     kParamCount
